@@ -113,7 +113,7 @@ const postcssLoader = {
   loader: 'postcss-loader',
 };
 
-const getBaseConfig = () => ({
+const getBaseConfig = async () => ({
   mode: isProd ? 'production' : 'development',
   target: 'web', // required by live reloading
   devtool: isProd ? false : 'inline-source-map',
@@ -222,12 +222,12 @@ const getBaseConfig = () => ({
     ...styleOptions.extract ? [new MiniCssExtractPlugin({
       filename: '[name].css',
     })] : [],
-    require('unplugin-icons/webpack')(),
+    (await import('unplugin-icons/webpack')).default(),
   ],
 });
 
-const getPageConfig = () => {
-  const config = getBaseConfig();
+const getPageConfig = async () => {
+  const config = await getBaseConfig();
   config.entry = Object.fromEntries(pages.map(name => [`${name}/index`, `./src/${name}`]));
   config.plugins = [
     ...config.plugins,

@@ -54,8 +54,8 @@ const skipReinjectionHeader = `{
   const INIT_FUNC_NAME = '${INIT_FUNC_NAME}';
   if (window[INIT_FUNC_NAME] !== 1)`;
 
-const buildConfig = (page, entry, init) => {
-  const config = entry ? getBaseConfig() : getPageConfig();
+const buildConfig = async (page, entry, init) => {
+  const config = entry ? await getBaseConfig() : await getPageConfig();
   config.plugins.push(new webpack.DefinePlugin({
     ...defsObj,
     // Conditional compilation to remove unsafe and unused stuff from `injected`
@@ -65,11 +65,11 @@ const buildConfig = (page, entry, init) => {
     config.entry = { [page]: entry };
   }
   if (!entry) init = page;
-  if (init) init(config);
+  if (init) await init(config);
   return config;
 };
 
-module.exports = [
+module.exports = Promise.all([
   buildConfig((config) => {
     addWrapperWithGlobals('common', config, defsObj, getGlobals => ({
       header: () => `{ ${getGlobals()}`,
@@ -107,4 +107,4 @@ module.exports = [
         }};0;`,
     }));
   }),
-];
+]);
