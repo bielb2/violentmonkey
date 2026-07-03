@@ -3,6 +3,7 @@ import cache from './cache';
 import { getData, getScriptsByURL } from './db';
 import { badges, getFailureReason } from './icon';
 import { addOwnCommands, addPublicCommands, commands } from './init';
+import { setMenus } from './page-menu-commands';
 
 /** @type {{[tabId: string]: chrome.runtime.Port}} */
 export const popupTabs = {};
@@ -44,6 +45,7 @@ addPublicCommands({
   SetPopup(data, src) {
     const tabId = src.tab.id;
     const key = getCacheKey(tabId);
+    setMenus(data.menus, src);
     if (popupTabs[tabId]) {
       return; // allowing the visible popup's onMessage to handle this message
     }

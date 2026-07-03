@@ -1,10 +1,12 @@
 import {
   dataUri2text, i18n, getScriptHome, isDataUri,
   getScriptName, getScriptsTags, getScriptUpdateUrl, isRemote, sendCmd, trueJoin,
-  getScriptPrettyUrl, getScriptRunAt, makePause, isValidHttpUrl, normalizeTag,
+  getScriptPrettyUrl, getScriptRunAt, makePause, isValidHttpUrl,
   ignoreChromeErrors,
 } from '@/common';
-import { FETCH_OPTS, INFERRED, TIMEOUT_24HOURS, TIMEOUT_WEEK, TL_AWAIT } from '@/common/consts';
+import {
+  FETCH_OPTS, INFERRED, kTag, TIMEOUT_24HOURS, TIMEOUT_WEEK, TL_AWAIT,
+} from '@/common/consts';
 import { deepSize, forEachEntry, forEachKey, forEachValue } from '@/common/object';
 import pluginEvents from '../plugin/events';
 import {
@@ -157,16 +159,23 @@ addOwnCommands({
         id,
         uri,
       };
-      const {pathMap} = script.custom = Object.assign({}, defaultCustom, script.custom);
+      const custom = script.custom = { ...defaultCustom, ...script.custom };
+      const { pathMap, tags } = custom;
+      const meta = script.meta ||= {};
+      const tag = meta[kTag];
+      if (tags) {
+        custom[kTag] = tags.split(/\s+/);
+        delete custom.tags;
+      }
+      if (tag && !Array.isArray(tag) /* script installed in an older VM */) {
+        meta[kTag] = tag.split(/\s+/);
+      }
       // Patching the bug in 2.27.0 where data: URI was saved as invalid in pathMap
       if (pathMap) for (const url in pathMap) if (isDataUri(url)) delete pathMap[url];
       maxScriptId = Math.max(maxScriptId, id);
       maxScriptPosition = Math.max(maxScriptPosition, getInt(script.props.position));
       (script.config.removed ? removedScripts : aliveScripts).push(script);
       // listing all known resource urls in order to remove unused mod keys
-      const {
-        meta = script.meta = {},
-      } = script;
       if (!meta.require) meta.require = [];
       if (!meta.resources) meta.resources = {};
       if (TL_AWAIT in meta) meta[TL_AWAIT] = true; // a string if the script was saved in old VM
@@ -676,7 +685,6 @@ export async function parseScript(src) {
   }
   // Allowing any http url including localhost as the user may keep multiple scripts there
   if (isValidHttpUrl(src.url)) custom.lastInstallURL = src.url;
-  custom.tags = custom.tags?.split(/\s+/).map(normalizeTag).filter(Boolean).join(' ').toLowerCase();
   if (!srcUpdate) storage.mod.remove(getScriptUpdateUrl(script, { all: true }) || []);
   buildPathMap(script, src.url);
   const depsPromise = fetchResources(script, src);
@@ -826,6 +834,7 @@ export async function vacuum(data) {
   const sizes = {};
   const result = {};
   const toFetch = [];
+  const errors = result.errors = [];
   const keysToRemove = [];
   /** -1=untouched, 1=touched, 2(+scriptId)=missing */
   const status = {};
@@ -902,17 +911,17 @@ export async function vacuum(data) {
         noFetch.push(url || +id && getScriptPrettyUrl(getScriptById(id)) || key);
       } else if (url && area.fetch) {
         keysToRemove.push(S_MOD_PRE + url);
-        toFetch.push(area.fetch(url).catch(err => `${
+        toFetch.push(area.fetch(url).catch(err => errors.push(`${
           getScriptName(getScriptById(+id || value - 2))
         }: ${
           formatHttpError(err)
-        }`));
+        }`)));
       }
     }
   });
   if (keysToRemove.length) {
     await storage.api.remove(keysToRemove); // Removing `mod` before fetching
-    result.errors = (await Promise.all(toFetch)).filter(Boolean);
+    await Promise.all(toFetch);
   }
   if (noFetch && noFetch.length) {
     console.warn('Missing required resources. ' + kTryVacuuming, noFetch);

@@ -169,6 +169,7 @@ declare interface VMScript {
   };
   custom: {
     name?: string;
+    comment?: string;
     /** Installation web page that will be used for inferring a missing @homepageURL */
     from?: string;
     downloadURL?: string;
@@ -186,9 +187,11 @@ declare interface VMScript {
     origExcludeMatch: boolean;
     origInclude: boolean;
     origMatch: boolean;
+    origTag: boolean;
     pathMap?: StringMap;
     runAt?: VMScriptRunAt;
-    tags?: string;
+    /** @since v2.36 */
+    tag?: string[];
   };
   meta: {
     author?: string;
@@ -209,6 +212,7 @@ declare interface VMScript {
     resources: StringMap;
     runAt?: VMScriptRunAt;
     supportURL?: string;
+    tag?: string[];
     topLevelAwait?: boolean;
     unwrap?: boolean;
     version?: string;
@@ -227,6 +231,30 @@ declare interface VMScript {
     supportURL?: string;
     visit: number;
   },
+}
+
+declare interface UIScriptCache {
+  code?: string;
+  desc: string;
+  lowerName: string;
+  /** Name search result for highlighting the match */
+  mark?: RegExpExecArray;
+  name: string;
+  /** Search result grouping priority, 0: hide, 1: code, 2: desc, 3: tag, 4: name */
+  show?: number;
+  size: string;
+  sizeNum: number;
+  sizes: string;
+  sizesNum: number[];
+  storageSize: number;
+  tag: string | string[];
+}
+
+declare interface UIScript extends VMScript {
+  $cache: Partial<UIScriptCache>;
+  $canUpdate: 1 | -1 | void;
+  safeIcon: string | null;
+  noIcon: '' | null;
 }
 
 declare interface VMScriptSourceOptions extends DeepPartial<Omit<VMScript, 'inferred'>> {
@@ -280,6 +308,8 @@ declare interface VMInjection extends VMInjectionDisabled, VMInjectionFlags {
   page: boolean;
   scripts: VMInjection.Script[];
   sessionId: string;
+  /** show GM_registerMenuCommand in context menu */
+  useMenu: boolean;
 }
 
 /**
@@ -318,6 +348,7 @@ declare namespace VMInjection {
    */
   interface Bag {
     csReg?: Promise<browser.contentScripts.RegisteredContentScript>;
+    csStop?: Function;
     forceContent?: boolean;
     inject: VMInjection;
     more: EnvDelayed;
@@ -396,9 +427,8 @@ declare type VMSearchOptions = {
 /** Throws on error */
 declare type VMStorageFetch = (
   url: string,
-  /** 'res' makes the function resolve with the result */
-  options?: VMReq.Options | 'res',
-) => Promise<void>
+  options?: VMReq.Options,
+) => Promise<string>
 
 /** Augmented by handleCommandMessage in messages from the content script */
 declare interface VMMessageSender extends chrome.runtime.MessageSender {

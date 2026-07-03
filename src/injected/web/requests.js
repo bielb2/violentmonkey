@@ -9,11 +9,11 @@ const kResponseXML = 'responseXML';
 const kDocument = 'document';
 const kRaw = 'raw';
 const kOnerror = 'on' + ERROR;
-const kOnload = 'onload';
+const LOAD = 'load';
 const EVENTS_TO_NOTIFY = [
   'abort',
   ERROR,
-  'load',
+  LOAD,
   'loadend',
   'loadstart',
   'progress',
@@ -135,8 +135,13 @@ function parseRaw(req, msg, propName) {
       && propName === kResponseXML
       && PARSEABLE_TYPES::indexOf(ct = getContentType(msg) || kContentTextHtml) >= 0
     || responseType === 'json') {
-      try { res = ct ? new SafeDOMParser()::parseFromString(res, ct) : jsonParse(res); }
-      catch (e) { res = null; /* per specification */ }
+      try {
+        if (ct) {
+          bridge.call('ParseHTML', [res, ct], null, function () { res = this; });
+        } else {
+          res = jsonParse(res);
+        }
+      } catch (e) { res = null; /* per specification */ }
     }
     if (responseType === kDocument) {
       const otherPropName = propName === kResponse ? kResponseXML : kResponse;
@@ -205,12 +210,6 @@ export function onRequestCreate(opts, context, fileName) {
     anonymous = !withCredentials,
     [UPLOAD]: upload,
   } = opts;
-  // setting opts.onload and onerror before EVENTS_TO_NOTIFY
-  if (context.async) res = new SafePromise((resolve, reject) => {
-    const { [kOnload]: onload, [kOnerror]: onerror } = opts;
-    opts[kOnload] = onload ? v => { resolve(v); onload(v); } : resolve;
-    opts[kOnerror] = onerror ? v => { reject(v); onerror(v); } : reject;
-  });
   for (let i = 0, obj, key, val, passes = upload && isObject(upload) ? 2 : 1; i < passes; i++) {
     obj = i ? nullObjFrom(upload) : opts;
     for (key of EVENTS_TO_NOTIFY) {
@@ -220,14 +219,19 @@ export function onRequestCreate(opts, context, fileName) {
       }
     }
   }
+  if (context.async) res = new SafePromise((resolve, reject) => {
+    const { [LOAD]: onload, [ERROR]: onerror } = cb[0];
+    cb[0][LOAD] = onload ? v => { resolve(v); onload(v); } : (events[0][LOAD] = true, resolve);
+    cb[0][ERROR] = onerror ? v => { reject(v); onerror(v); } : (events[0][ERROR] = true, reject);
+  });
   idMap[id] = req;
   data = data == null && []
     // `binary` is for TM/GM-compatibility + non-objects = must use a string `data`
     || (opts.binary || !isObject(data)) && [`${data}`]
     // No browser can send FormData/URLSearchParams directly across worlds
     || getFormData(data)
-    // FF56+ can send any cloneable data directly, FF52-55 can't due to https://bugzil.la/1371246
-    || IS_FIREFOX >= 56 && [data]
+    // FF56+ can send any cloneable data directly
+    || IS_FIREFOX && [data]
     || [data, 'bin'];
   /** @type {GMReq.Message.Web} */
   bridge.call('HttpRequest', safePickInto({

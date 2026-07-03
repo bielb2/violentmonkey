@@ -1,4 +1,4 @@
-import { browserWindows, request, noop, i18n, getUniqId } from '@/common';
+import { browserWindows, request, noop, i18n, getUniqId, getTab } from '@/common';
 import { FILE_GLOB_ALL } from '@/common/consts';
 import cache from './cache';
 import { addPublicCommands, commands } from './init';
@@ -9,8 +9,7 @@ import { FIREFOX } from './ua';
 
 addPublicCommands({
   async CheckInstallerTab(tabId, src) {
-    const tab = IS_FIREFOX && (src.url || '').startsWith('file:')
-      && await browser.tabs.get(tabId).catch(noop);
+    const tab = IS_FIREFOX && (src.url || '').startsWith('file:') && await getTab(tabId);
     return tab && getTabUrl(tab).startsWith(CONFIRM_URL_BASE);
   },
   ConfirmInstall: confirmInstall,
@@ -83,7 +82,7 @@ const maybeRedirectVirtualUrlFF = virtualUrlRe && ((tabId, src) => {
 
 async function maybeInstallUserJs(tabId, url, isWhitelisted) {
   // Getting the tab now before it navigated
-  const tab = tabId >= 0 && await browser.tabs.get(tabId) || {};
+  const tab = tabId >= 0 && await getTab(tabId) || {};
   const { data: code } = !isWhitelisted && await request(url).catch(noop) || {};
   if (isWhitelisted || code && parseMeta(code).name) {
     confirmInstall({ code, url, from: tab.url, parsed: true }, { tab });
@@ -117,7 +116,7 @@ browser.tabs.onCreated.addListener((tab) => {
   const isUserJS = /\.user\.js([?#]|$)/.test(url);
   /* Determining if this tab can be auto-closed (replaced, actually).
      FF>=68 allows reading file: URL only in the tab's content script so the tab must stay open. */
-  if (isUserJS && (!isFile || FIREFOX < 68)) {
+  if (isUserJS && !isFile) {
     cache.put(`autoclose:${id}`, true, 10e3);
   }
   if (virtualUrlRe && url === 'about:blank') {

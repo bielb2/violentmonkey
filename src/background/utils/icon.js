@@ -7,6 +7,7 @@ import { popupTabs } from './popup-tracker';
 import storage, { S_CACHE } from './storage';
 import { forEachTab, getTabUrl, injectableRe, openDashboard, tabsOnRemoved, tabsOnUpdated } from './tabs';
 import { testBlacklist } from './tester';
+import { contextMenus, handlePageMenuCommand } from './page-menu-commands';
 import { FIREFOX, ua } from './ua';
 
 /** 1x + HiDPI 1.5x, 2x */
@@ -41,8 +42,6 @@ const browserAction = (() => {
     'setTitle',
   ], fn => (fn ? makeMethod(fn) : noop));
 })();
-// Promisifying explicitly because this API returns an id in Firefox and not a Promise
-const contextMenus = chrome.contextMenus;
 
 /** @type {{ [tabId: string]: VMBadgeData }}*/
 export const badges = {};
@@ -124,8 +123,10 @@ init.then(async () => {
   }
 });
 
-contextMenus?.onClicked.addListener(({ menuItemId: id }, tab) => {
-  handleHotkeyOrMenu(id, tab);
+contextMenus?.onClicked.addListener(({ menuItemId: id, frameId }, tab) => {
+  if (!handlePageMenuCommand(id, tab, frameId)) {
+    handleHotkeyOrMenu(id, tab);
+  }
 });
 tabsOnRemoved.addListener(id => delete badges[id]);
 tabsOnUpdated.addListener((tabId, { url }, tab) => {
@@ -264,14 +265,20 @@ export function handleHotkeyOrMenu(id, tab) {
 async function loadIcon(url) {
   const img = new Image();
   const isOwn = url.startsWith(ICON_PREFIX);
-  img.src = isOwn ? url.slice(extensionOrigin.length) // must be a relative path in Firefox Android
+  const src = isOwn ? url.slice(extensionOrigin.length) // must be a relative path in Firefox Android
     : url.startsWith('data:') ? url
-      : makeDataUri(url[0] === 'i' ? url : await loadStorageCache(url))
-        || url;
-  await new Promise((resolve) => {
+      : makeDataUri(url[0] === 'i' ? url : await loadStorageCache(url));
+  if (!src) {
+    // not saving to iconCache[url] because it may be a temporary network problem
+    return;
+  }
+  img.src = src;
+  if (!await new Promise((resolve) => {
     img.onload = resolve;
-    img.onerror = resolve;
-  });
+    img.onerror = () => resolve();
+  })) {
+    return;
+  }
   let res;
   let maxSize = !isOwn && (2 * 38); // dashboard icon size for 2xDPI
   let { width, height } = img;
@@ -301,5 +308,5 @@ async function loadIcon(url) {
 
 async function loadStorageCache(url) {
   return await storage[S_CACHE].getOne(url)
-    ?? await storage[S_CACHE].fetch(url, 'res').catch(console.warn);
+    ?? await storage[S_CACHE].fetch(url).catch(console.warn);
 }

@@ -1,5 +1,6 @@
 const { resolve } = require('path');
 const { VueLoaderPlugin } = require('vue-loader');
+const progressBarPlugin = require('progress-bar-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
@@ -69,7 +70,7 @@ const createHtmlPage = key => new HtmlWebpackPlugin({
 
 const splitVendor = prefix => ({
   [prefix]: {
-    test: new RegExp(`node_modules[/\\\\]${prefix}`),
+    test: new RegExp('[\\\\/]' + prefix),
     name: `public/lib/${prefix}`,
     chunks: 'all',
     priority: 100,
@@ -140,7 +141,8 @@ const getBaseConfig = async () => ({
       {
         test: /\.m?[jt]sx?$/,
         use: 'babel-loader',
-        exclude: file => /node_modules/.test(file) && !/vueleton|@vue[/\\]shared/.test(file),
+        exclude: file => /node_modules/.test(file)
+          && !/vueleton|@vue[/\\]shared|@usync/.test(file),
       },
       // CSS
       {
@@ -186,6 +188,16 @@ const getBaseConfig = async () => ({
           },
         },
       },
+      // Patch fflate to expose file timestamp
+      {
+        test: /fflate/,
+        loader: 'string-replace-loader',
+        options: {
+          search: / size: sc,/g,
+          replace: '$& time: b4(data,o+12),',
+          strict: true,
+        }
+      },
     ],
   },
   optimization: {
@@ -198,8 +210,8 @@ const getBaseConfig = async () => ({
             /\bsvg/,
             // don't extract CSS as it'll change the relative order of rules which breaks appearance
             'src/common/(?!zip|.*\\.css$)',
-            'node_modules/@violentmonkey/shortcut',
-            'node_modules/@?vue',
+            '@violentmonkey/shortcut',
+            '/@?vue',
           ].map(re => re.source || re).join('|').replace(/\\?\//g, '[/\\\\]')),
           chunks: c => ![
             'background/index', // only 4kB of common code
@@ -217,13 +229,17 @@ const getBaseConfig = async () => ({
     ] : [],
   },
   plugins: [
+    !process.env.GITHUB_ACTIONS && new progressBarPlugin({
+      format: '[:bar] :percent (:elapsed seconds), :msg',
+      summary: false,
+    }),
     new VueLoaderPlugin(),
     new GroupAssetsPlugin(),
     ...styleOptions.extract ? [new MiniCssExtractPlugin({
       filename: '[name].css',
     })] : [],
-    (await import('unplugin-icons/webpack')).default(),
-  ],
+    require('unplugin-icons/webpack')(),
+  ].filter(Boolean),
 });
 
 const getPageConfig = async () => {

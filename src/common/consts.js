@@ -50,9 +50,11 @@ export const UA_PROPS = ['userAgent', 'brands', 'mobile', 'platform'];
 export const TL_AWAIT = 'topLevelAwait';
 export const UNWRAP = 'unwrap';
 export const FETCH_OPTS = 'fetchOpts';
-export const ERR_BAD_PATTERN = 'Bad pattern:';
+export const ERR_BAD_PATTERN = 'Bad pattern';
 export const VM_HOME = 'https://violentmonkey.github.io/';
+export const VM_DOCS_INJECT_INTO = VM_HOME + 'posts/inject-into-context/';
 export const VM_DOCS_MATCHING = VM_HOME + 'api/matching/';
+export const GLOB_ALL = '*://*/*';
 export const FILE_GLOB_ALL = 'file://*/*';
 export const XHR_COOKIE_RE = /:\W+([-\w]+)/; // extracts ://id in Chrome, ://{id} in Firefox
 /** @type {(str: string, opts?: {}) => Uint8Array} */
@@ -90,3 +92,5 @@ export const GM4_ALIAS = {
   getResourceURL: 'getResourceUrl',
   xmlhttpRequest: 'xmlHttpRequest',
 };
+export const kOrigTag = 'origTag';
+export const kTag = 'tag';

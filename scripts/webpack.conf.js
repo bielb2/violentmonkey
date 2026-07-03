@@ -1,3 +1,4 @@
+const { resolve } = require('path');
 const webpack = require('webpack');
 const { ListBackgroundScriptsPlugin } = require('./manifest-helper');
 const { addWrapperWithGlobals, getCodeMirrorThemes } = require('./webpack-util');
@@ -41,6 +42,7 @@ const defsObj = {
     'SYNC_GOOGLE_DESKTOP_ID',
     'SYNC_GOOGLE_DESKTOP_SECRET',
     'SYNC_ONEDRIVE_CLIENT_ID',
+    'SYNC_ONEDRIVE_ACCOUNT_TYPE',
     'SYNC_DROPBOX_CLIENT_ID',
   ]),
   'process.env.INIT_FUNC_NAME': JSON.stringify(INIT_FUNC_NAME),
@@ -79,6 +81,10 @@ module.exports = Promise.all([
     config.plugins.push(new ListBackgroundScriptsPlugin({
       minify: false, // keeping readable
     }));
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '../css/css$': resolve('src/common/ui/codemirror-ovr/css.js'),
+    };
     (config.ignoreWarnings ??= []).push({
       // suppressing a false warning (the HTML spec allows it) as we don't need SSR
       message: /<tr> cannot be child of <table>/,

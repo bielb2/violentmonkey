@@ -2,18 +2,20 @@ import {
   getActiveTab, getScriptName, getScriptPrettyUrl, getUniqId, sendTabCmd,
 } from '@/common';
 import {
-  __CODE, TL_AWAIT, UNWRAP, XHR_COOKIE_RE,
-  BLACKLIST, HOMEPAGE_URL, KNOWN_INJECT_INTO, META_STR, METABLOCK_RE, NEWLINE_END_RE,
+  __CODE, BLACKLIST, GLOB_ALL, HOMEPAGE_URL, KNOWN_INJECT_INTO, kOrigTag, kTag, META_STR,
+  METABLOCK_RE, NEWLINE_END_RE, TL_AWAIT, UNWRAP, XHR_COOKIE_RE,
 } from '@/common/consts';
 import initCache from '@/common/cache';
 import {
   deepCopy, forEachEntry, forEachValue, mapEntry, objectPick, objectSet,
 } from '@/common/object';
+import { kPageMenuCommands } from '@/common/options-defaults';
 import { CACHE_KEYS, getScriptsByURL, kTryVacuuming, PROMISE, REQ_KEYS, VALUE_IDS } from './db';
 import { setBadge } from './icon';
 import { addOwnCommands, addPublicCommands } from './init';
 import { clearNotifications } from './notifications';
 import { hookOptionsInit } from './options';
+import { addMenuConfig, setMenus } from './page-menu-commands';
 import { popupTabs } from './popup-tracker';
 import { clearRequestsByTabId, reifyRequests } from './requests';
 import { kSetCookie } from './requests-core';
@@ -36,7 +38,7 @@ let xhrInjectKey;
 const sessionId = getUniqId();
 const API_HEADERS_RECEIVED = browser.webRequest.onHeadersReceived;
 const API_CONFIG = {
-  urls: ['*://*/*'], // `*` scheme matches only http and https
+  urls: [GLOB_ALL], // `*` scheme matches only http and https
   types: ['main_frame', 'sub_frame'],
 };
 const API_EXTRA = [
@@ -79,7 +81,7 @@ const META_KEYS_TO_ENSURE = [
 const META_KEYS_TO_ENSURE_FROM = [
   [HOMEPAGE_URL, 'homepage'],
 ];
-const META_KEYS_TO_PLURALIZE_RE = /^(?:(m|excludeM)atch|(ex|in)clude)$/;
+const META_KEYS_TO_PLURALIZE_RE = /^(?:(m|excludeM)atch|(ex|in)clude|tag)$/;
 const pluralizeMetaKey = (s, consonant) => s + (consonant ? 'es' : 's');
 const pluralizeMeta = key => key.replace(META_KEYS_TO_PLURALIZE_RE, pluralizeMetaKey);
 const propsToClear = {
@@ -90,9 +92,14 @@ const propsToClear = {
   [S_VALUE_PRE]: VALUE_IDS,
 };
 const expose = {};
-const resolveDataCodeStr = `(${(global, data) => {
-  if (global.vmResolve) global.vmResolve(data); // `window` is a const which is inaccessible here
-  else global.vmData = data; // Ran earlier than the main content script so just drop the payload
+const resolveDataCodeStr = `(${(global, key, data) => {
+  // Using `global` and `key` as parameters because global consts aren't accessible here
+  if (typeof global[key] === 'function') {
+    global[key](data);
+  } else if (global[process.env.INIT_FUNC_NAME] !== 1) { // eslint-disable-line no-undef
+    // Ran earlier than the main content script so let's just drop the payload
+    global[key] = data;
+  }
 }})`;
 const getKey = (url, isTop) => (
   isTop ? url : `-${url}`
@@ -135,6 +142,16 @@ const OPT_HANDLERS = {
     }
     injectInto = value;
   },
+  [kPageMenuCommands](enable) {
+    cache.some(val => {
+      const inject = val[INJECT];
+      if (inject && kUseMenu in inject) {
+        inject[kUseMenu] = enable;
+        if (contentScriptsAPI) unregisterScriptFF(val);
+        // TODO: maybe re-register automatically?
+      }
+    });
+  },
   /** WARNING! toggleXhrInject should precede togglePreinject as it sets xhrInject variable */
   xhrInject: toggleXhrInject,
   [IS_APPLIED]: togglePreinject,
@@ -174,6 +191,7 @@ addPublicCommands({
     if (scripts) {
       triageRealms(scripts, bag[FORCE_CONTENT] || forceContent, tabId, frameId, bag);
       addValueOpener(scripts, tabId, frameDoc);
+      addMenuConfig(inject);
       if (isTop < 2/* skip prerendered pages*/ && scripts.length) {
         updateVisitedTime(scripts);
       }
@@ -231,6 +249,9 @@ addPublicCommands({
     }
     if (reset === 'bfcache' && hasIds) {
       addValueOpener(ids, tabId, getFrameDocId(isTop, docId, src[kFrameId]));
+    }
+    if (reset) {
+      setMenus({}, src, reset);
     }
   },
 });
@@ -363,10 +384,9 @@ function onHeadersReceived(info) {
   const bag = cache.get(key);
   // The INJECT data is normally already in cache if code and values aren't huge
   if (bag && !bag[FORCE_CONTENT] && bag[INJECT]?.[SCRIPTS] && !skippedTabs[info.tabId]) {
-    const ffReg = IS_FIREFOX && info.url.startsWith('https:')
-      && detectStrictCsp(info, bag);
     const res = xhrInject && prepareXhrBlob(info, bag);
-    return ffReg ? ffReg.then(res && (() => res)) : res;
+    return IS_FIREFOX && info.url.startsWith('https:') && detectStrictCsp(info, bag, res)
+      || res;
   }
 }
 
@@ -505,17 +525,18 @@ function prepareScript(script, env) {
     inject_into: custom[INJECT_INTO] || null,
     noframes: custom.noframes ?? null,
     override: {
-      merge_excludes: !!custom.origExclude,
-      merge_includes: !!custom.origInclude,
-      merge_matches: !!custom.origMatch,
-      merge_exclude_matches: !!custom.origExcludeMatch,
+      merge_excludes: custom.origExclude,
+      merge_includes: custom.origInclude,
+      merge_matches: custom.origMatch,
+      merge_exclude_matches: custom.origExcludeMatch,
+      merge_tags: custom[kOrigTag],
       use_excludes: custom.exclude || [],
       use_includes: custom.include || [],
       use_matches: custom.match || [],
       use_exclude_matches: custom.excludeMatch || [],
     },
     run_at: custom[RUN_AT] || null,
-    tags: custom.tags?.split(' ').filter(Boolean) || [],
+    tags: custom[kTag] || [],
     user_modified: script.props.lastModified || 0,
   };
   if (wrap) {
@@ -630,14 +651,15 @@ function injectContentRealm(toContent, tabId, frameId) {
 // TODO: rework the whole thing to register scripts individually with real `matches`
 // (this will also allow proper handling of @noframes)
 function registerScriptDataFF(inject, url) {
+  addMenuConfig(inject);
   for (const scr of inject[SCRIPTS]) {
     scr.code = scr[__CODE];
   }
   return contentScriptsAPI.register({
     js: [{
-      code: `${resolveDataCodeStr}(this,${JSON.stringify(inject)})`,
+      code: `${resolveDataCodeStr}(this,"${VIOLENTMONKEY}",${JSON.stringify(inject)})`,
     }],
-    matches: url.split('#', 1),
+    matches: [url.split('#', 1)[0].replace(/\*/g, '\\$&')], // escape `*` in the URL itself
     [RUN_AT]: 'document_start',
   });
 }
@@ -653,8 +675,9 @@ function unregisterScriptFF(bag) {
 /**
  * @param {chrome.webRequest.WebResponseHeadersDetails} info
  * @param {VMInjection.Bag} bag
+ * @param {browser.webRequest.BlockingResponse} response
  */
-function detectStrictCsp(info, bag) {
+function detectStrictCsp(info, bag, response) {
   const h = info[kResponseHeaders].find(findCspHeader);
   if (!h) return;
   let tmp = '';
@@ -663,9 +686,9 @@ function detectStrictCsp(info, bag) {
     tmp += m[2] ? (defaultSrc = m[3]) : m[1] ? (scriptElemSrc = m[3]) : (scriptSrc = m[3]);
   }
   if (!tmp) return;
-  tmp = tmp.match(NONCE_RE);
-  if (tmp) {
-    bag[INJECT].nonce = tmp[1];
+  const nonce = tmp.match(NONCE_RE);
+  if (nonce) {
+    bag[INJECT].nonce = nonce[1];
   } else if (
     scriptSrc && !scriptSrc.includes(UNSAFE_INLINE) ||
     scriptElemSrc && !scriptElemSrc.includes(UNSAFE_INLINE) ||
@@ -675,13 +698,13 @@ function detectStrictCsp(info, bag) {
   } else {
     return;
   }
-  m = unregisterScriptFF(bag);
-  if (m && !tmp) {
-    // Registering only without nonce, otherwise FF will incorrectly reuse it on tab reload
-    return Promise.all([
-      m,
+  // Always unregister, then re-register if no nonce to avoid reusing the old value on tab reload
+  if (contentScriptsAPI && unregisterScriptFF(bag) && !nonce) {
+    bag.csStop?.(); // resolving a potential deadlock in CS API on a fast redirect
+    return Promise.race([
       bag[CSAPI_REG] = registerScriptDataFF(bag[INJECT], info.url),
-    ]);
+      new Promise(resolve => (bag.csStop = resolve)),
+    ]).then(() => (bag.csStop = null, response));
   }
 }
 
